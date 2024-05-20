@@ -64,8 +64,7 @@ def send_message(bot, message):
         logger.debug('Сообщение успешно отправлено.')
     except Exception as error:
         msg = 'Ошибка при отправке, сообщение не было отправлено'
-        logger.error(msg)
-        return error
+        logger.error(f'{msg}{error}')
 
 
 def get_api_answer(timestamp):
@@ -132,7 +131,7 @@ def main():
     except Exception as error:
         message = f'Ошибка при отправке уведомления о запуске бота: {error}'
         logger.error(message)
-        return
+
     timestamp = 1716110891
     while True:
         try:
