@@ -1,14 +1,15 @@
 import logging
 import os
 import sys
-import requests
 import time
 from http import HTTPStatus
 
+import requests
 from telebot import TeleBot
+from telebot.apihelper import ApiException
 from dotenv import load_dotenv
 
-from exceptions import EmptyKeyOrValue, StatusAccessError
+import exceptions as ex
 
 load_dotenv()
 
@@ -38,18 +39,21 @@ logger.addHandler(handler)
 
 
 def check_tokens():
-    """
-    Проверяет доступность переменных окружения.
-    которые необходимы для работы программы.
-    """
-    tokens = (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+    """Проверяет доступность переменных окружения."""
+    tokens = {
+        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
+    }
 
-    for token in tokens:
-        if not token:
-            token_error = 'Отсутствуют необходимые токены.\
-                Программа завершена.'
-            logger.critical(token_error)
-            return False
+    missing_tokens = [
+        name for name, token in tokens.items() if not token
+        ]
+    if missing_tokens:
+        msg = f'Отсутствуют необходимые токены:{", ".join(missing_tokens)}'
+        logger.critical(msg)
+        return False
+    logger.debug('Все токены на месте.')
     return True
 
 
@@ -57,30 +61,37 @@ def send_message(bot, message):
     """Отправка сообщений в телеграмм."""
     chat_id = TELEGRAM_CHAT_ID
     try:
+        logger.debug('Начало отправки сообщение.')
         bot.send_message(
             chat_id=chat_id,
             text=message,
         )
         logger.debug('Сообщение успешно отправлено.')
-    except Exception as error:
+    except ApiException as error:
         msg = 'Ошибка при отправке, сообщение не было отправлено'
         logger.error(f'{msg}{error}')
+        return error
 
 
 def get_api_answer(timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса."""
-    payload = {'form_data': timestamp}
-    try:
-        response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
-    except Exception as error:
-        logger.error(
-            f'Ошибка при запросе к единственному эндпоинту API: {error}'
+    request_params = {
+        'url': ENDPOINT,
+        'headers': HEADERS,
+        'params': {'from_date': timestamp}
+    }
+    logger.debug(
+        'Начало запроса к API: '
+        'URL={url}, Headers={headers}, Params={params}'.format(
+            **request_params
         )
-        return None
+    )
+    try:
+        response = requests.get(**request_params)
+    except requests.RequestException:
+        raise ex.EndpointAccessError
     if response.status_code != HTTPStatus.OK:
-        logger.error(f'Ошибка: Неожиданный статус-код {response.status_code}\
-            при запросе к API')
-        raise StatusAccessError('Проблема с доступом к ENDPOINT.')
+        raise ex.UnexpectedStatusCodeError
     return response.json()
 
 
@@ -89,12 +100,15 @@ def check_response(response):
     try:
         homeworks = response['homeworks']
     except KeyError:
-        msg = 'Ошибка, api не содержит ключа "homeworks".'
+        msg = 'Ошибка, некорректный формат данных.'
         logger.error(msg)
-        raise KeyError
+        raise ex.EmptyResponseAPI(msg)
     if not isinstance(homeworks, list):
         logger.error('Ошибка, тип данных не соответствуют ожидаемому.')
-        raise TypeError
+        raise TypeError('Неверный тип данных. Ожидался List.')
+    if not isinstance(response, dict):
+        logger.error('Ошибка, тип данных не соответствуют ожидаемому.')
+        raise TypeError('Неверный тип данных.Ожидался Dict.')
     return homeworks
 
 
@@ -103,13 +117,9 @@ def parse_status(homework):
     homework_name = homework.get('homework_name')
     status = homework.get('status')
     if homework_name is None:
-        homework_error = 'Ошибка, homework_name не найден!'
-        logger.error(homework_error)
-        raise EmptyKeyOrValue
+        raise ex.EmptyKeyOrValue('Ошибка, пустое homework_name.')
     if status is None:
-        status_error = 'Ошибка, status не найден!'
-        logger.error(status_error)
-        raise EmptyKeyOrValue
+        raise ex.EmptyKeyOrValue('Ошибка, пустой status.')
     try:
         verdict = HOMEWORK_VERDICTS[status]
     except KeyError:
@@ -121,35 +131,38 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        return
+        sys.exit('Отсутствуют необходимые токены')
     bot = TeleBot(token=TELEGRAM_TOKEN)
-    try:
-        bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text='Бот успешно запущен!'
-        )
-    except Exception as error:
-        message = f'Ошибка при отправке уведомления о запуске бота: {error}'
-        logger.error(message)
+    send_message(bot, 'Успешный запуск бота.')
+    timestamp = 0
+    old_status = None
 
-    timestamp = 1716110891
     while True:
         try:
             response = get_api_answer(timestamp)
+            if 'current_date' in response:
+                timestamp = response['current_date']
             homeworks = check_response(response)
-            for homework in homeworks:
-                if homework is not None:
+            if homeworks:
+                homework = homeworks[0]
+                new_status = homework.get('status')
+                if old_status != new_status:
                     message = parse_status(homework)
                     if message:
                         send_message(bot, message)
+                    old_status = new_status
             logger.debug('Никаких обновлений нет.')
-            time.sleep(RETRY_PERIOD)
+
+        except ex.CustomAPIError as error:
+            msg = f'Сбой в работе программы:{error}'
+            logger.error(msg)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.critical(message)
-            time.sleep(RETRY_PERIOD)
 
+        finally:
+            time.sleep(RETRY_PERIOD)
 
 if __name__ == '__main__':
     main()
