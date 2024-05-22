@@ -48,7 +48,7 @@ def check_tokens():
 
     missing_tokens = [
         name for name, token in tokens.items() if not token
-        ]
+    ]
     if missing_tokens:
         msg = f'Отсутствуют необходимые токены:{", ".join(missing_tokens)}'
         logger.critical(msg)
@@ -163,6 +163,7 @@ def main():
 
         finally:
             time.sleep(RETRY_PERIOD)
+
 
 if __name__ == '__main__':
     main()
