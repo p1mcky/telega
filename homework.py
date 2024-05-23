@@ -5,11 +5,12 @@ import time
 from http import HTTPStatus
 
 import requests
+from dotenv import load_dotenv
 from telebot import TeleBot
 from telebot.apihelper import ApiException
-from dotenv import load_dotenv
 
 import exceptions as ex
+
 
 load_dotenv()
 
@@ -70,7 +71,6 @@ def send_message(bot, message):
     except ApiException as error:
         msg = 'Ошибка при отправке, сообщение не было отправлено'
         logger.error(f'{msg}{error}')
-        return error
 
 
 def get_api_answer(timestamp):
@@ -100,14 +100,10 @@ def check_response(response):
     try:
         homeworks = response['homeworks']
     except KeyError:
-        msg = 'Ошибка, некорректный формат данных.'
-        logger.error(msg)
-        raise ex.EmptyResponseAPI(msg)
+        raise ex.EmptyResponseAPI('Ошибка, некорректный формат данных.')
     if not isinstance(homeworks, list):
-        logger.error('Ошибка, тип данных не соответствуют ожидаемому.')
         raise TypeError('Неверный тип данных. Ожидался List.')
     if not isinstance(response, dict):
-        logger.error('Ошибка, тип данных не соответствуют ожидаемому.')
         raise TypeError('Неверный тип данных.Ожидался Dict.')
     return homeworks
 
@@ -145,21 +141,27 @@ def main():
             homeworks = check_response(response)
             if homeworks:
                 homework = homeworks[0]
-                new_status = homework.get('status')
+                new_status = parse_status(homework)
                 if old_status != new_status:
                     message = parse_status(homework)
-                    if message:
-                        send_message(bot, message)
+                    send_message(bot, message)
                     old_status = new_status
-            logger.debug('Никаких обновлений нет.')
+            else:
+                if old_status is not None:
+                    message = 'Никаких обновлений нет.'
+                    send_message(bot, message)
+            logger.debug('Проверка успешно завершена.')
 
-        except ex.CustomAPIError as error:
+        except ex.APIError as error:
             msg = f'Сбой в работе программы:{error}'
             logger.error(msg)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logger.critical(message)
+            logger.error(message)
+            if old_status != message:
+                send_message(bot, message)
+                old_status = message
 
         finally:
             time.sleep(RETRY_PERIOD)
