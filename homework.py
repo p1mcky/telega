@@ -136,21 +136,19 @@ def main():
     while True:
         try:
             response = get_api_answer(timestamp)
-            if 'current_date' in response:
-                timestamp = response['current_date']
+            timestamp = response.get('current_date', timestamp)
             homeworks = check_response(response)
             if homeworks:
                 homework = homeworks[0]
                 new_status = parse_status(homework)
-                if old_status != new_status:
-                    message = parse_status(homework)
-                    send_message(bot, message)
-                    old_status = new_status
+                message = new_status
             else:
-                if old_status is not None:
-                    message = 'Никаких обновлений нет.'
-                    send_message(bot, message)
-            logger.debug('Проверка успешно завершена.')
+                message = 'Никаких обновлений нет.'
+
+            if old_status != message:
+                send_message(bot, message)
+                old_status = message
+                logger.debug('Проверка успешно завершена.')
 
         except ex.APIError as error:
             msg = f'Сбой в работе программы:{error}'
@@ -159,9 +157,6 @@ def main():
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(message)
-            if old_status != message:
-                send_message(bot, message)
-                old_status = message
 
         finally:
             time.sleep(RETRY_PERIOD)
