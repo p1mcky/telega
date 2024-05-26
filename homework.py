@@ -140,8 +140,7 @@ def main():
             homeworks = check_response(response)
             if homeworks:
                 homework = homeworks[0]
-                new_status = parse_status(homework)
-                message = new_status
+                message = parse_status(homework)
             else:
                 message = 'Никаких обновлений нет.'
 
@@ -150,13 +149,16 @@ def main():
                 old_status = message
                 logger.debug('Проверка успешно завершена.')
 
-        except ex.APIError as error:
+        except ex.EmptyResponseAPI as error:
             msg = f'Сбой в работе программы:{error}'
             logger.error(msg)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(message)
+            if old_status != message:
+                send_message(bot, message)
+                old_status = message
 
         finally:
             time.sleep(RETRY_PERIOD)
